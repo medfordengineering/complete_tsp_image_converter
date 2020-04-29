@@ -1,6 +1,6 @@
 <html>
    <body>
-      <form action = "http://localhost:5000/uploader" method = "POST" 
+      <form action = "http://localhost:5000/upload" method = "POST" 
          enctype = "multipart/form-data">
 		<label for="newfile">Select an image file:</label>
 		<input type = "file" id="newfile" name = "file"><br>
@@ -10,9 +10,12 @@
 		<input type="radio"  name="size" id= "medium" value = "320x240">
 		<label for="medium">320x240</label><br>
 		<p>
-		<label for="points">Select number of points from high to low:</label><br>
+		<label for="points">Select number of points from low to high:</label><br>
 		<input type="range" name="dots" id="points" value = "75" min="50" max="99"><br><p>
 		<input type = "submit"/><br>
+		<p>
+		<img src="{{url_for('static', filename=user_image)}}" /><br>
+		<p>This file has {{ points }} points. 
       </form>   
    </body>
 </html
