@@ -1,0 +1,19 @@
+<html>
+   <body>
+      <form action = "http://localhost:5000/uploader" method = "POST" 
+         enctype = "multipart/form-data">
+		<label for="newfile">Select an image file:</label>
+		<input type = "file" id="newfile" name = "file"><br>
+		<p>Select an output file size:<br>
+		<input type="radio"  name="size" id="small" value = "128x64">
+		<label for="small">128x64</label><br>
+		<input type="radio"  name="size" id= "medium" value = "320x240">
+		<label for="medium">320x240</label><br>
+		<p>
+		<label for="points">Select number of points from low to high:</label><br>
+		<input type="range" name="dots" id="points" value = "75" min="50" max="99"><br><p>
+		
+         <input type = "submit"/>
+      </form>   
+   </body>
+</html
