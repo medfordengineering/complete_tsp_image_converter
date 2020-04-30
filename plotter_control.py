@@ -5,17 +5,16 @@ from ortools.constraint_solver import pywrapcp
 
 from flask import Flask, render_template, request
 from werkzeug.utils import secure_filename
+import subprocess
 import os
 import sys
 import serial
 import json
-import time
 
 app = Flask(__name__)
 
+#MOVE THIS FROM GLOBAL
 coordinates = []
-#data = {}
-#data['points'] = 0
 
 def convert(list):
 	return tuple(list)
@@ -27,20 +26,28 @@ def upload_file():
 @app.route('/uploader', methods = ['GET', 'POST'])
 def uploaded_file():
 	if request.method == 'POST':
+		#get and store file
 		f = request.files['file']
 		infile = secure_filename(f.filename)
+		f.save('static/' + infile)
+
+		#create file names
 		outfile = infile.split('.')[0] + '.pbm'
 		viewfile = infile.split('.')[0] + '.gif'
-		f.save('static/' + infile)
+
+		#get data from user
 		size = request.form.get('size')
-		dots = request.form.get('dots')
-		command = 'convert {} +level {}%,100% -resize {} -dither FloydSteinberg -remap pattern:gray50 -compress none {}'.format('static/' + infile, dots, size, 'static/' + outfile) 
-		os.system(command)
-		command = 'convert {} {}'.format('static/' + outfile, 'static/' + viewfile)
-		os.system(command)
-		data = create_data_model('static/' + outfile)
-#		create_data_model('static/' + outfile)
-		return render_template('uploaded.html', user_image = viewfile, points = data['points'])
+		pixels = request.form.get('point_limit') 
+	
+		#calculate number of pixels
+		level, pixels = find_limit(int(pixels), size, infile)	
+	
+		#create view file
+		cmd = ['convert', 'static/' + outfile, 'static/' + viewfile]
+		subprocess.call(cmd, shell=False)
+	
+		#call page
+		return render_template('uploaded.html', user_image = viewfile, points = pixels)
 
 @app.route('/process', methods = ['GET', 'POST'])
 def process_file():
@@ -57,6 +64,44 @@ def add_header(r):
 	r.headers["Expires"] = "0"
 	r.headers['Cache-Control'] = 'public, max-age=0'
 	return r	
+
+def point_count(black_level, size, filename):
+	outfile = filename.split('.')[0] + '.pbm'
+	levels = '{}%,100%'.format(black_level)
+
+	#command used to convert standard image to reduced size 1-bit image
+	#PIPE TO FOLLOWING COMMANDS??
+#	cmd0 =['convert','static/' + filename, '+level', levels, '-resize', '640x480', '-dither', 'FloydSteinberg', '-remap', 'pattern:gray50', '-compress', 'none', 'static/' + outfile]
+	cmd0 =['convert','static/' + filename, '+level', levels, '-resize', size, '-dither', 'FloydSteinberg', '-remap', 'pattern:gray50', '-compress', 'none', 'static/' + outfile]
+	subprocess.call(cmd0, shell=False)
+
+	#commands used to return the number of black pixels in an image
+	cmd1 =['convert', 'static/' + outfile, '-format', '%c', 'histogram:info:']
+	cmd2 =['grep', '#000000']
+	cmd3 =['cut', '-d', ':', '-f1']
+
+	#shell processes for returning image value
+	out1 = subprocess.Popen(cmd1, stdout=subprocess.PIPE, shell=False)
+	out2 = subprocess.Popen(cmd2, stdin=out1.stdout, stdout=subprocess.PIPE, shell=False)
+	out3 = subprocess.Popen(cmd3, stdin=out2.stdout, stdout=subprocess.PIPE, shell=False) 
+	points = int(out3.communicate()[0].decode('utf-8').strip())
+	return points
+
+def find_limit(limit, size, filename):
+	points = 0
+	level = 90
+	while points < limit:
+		points = point_count(level, size, filename)
+		print ('{}:{}'.format(level, points))
+		level -= 10	
+
+	level += 11
+	while points > limit:
+		points = point_count(level, size, filename)
+		print ('{}:{}'.format(level, points))
+		level += 1
+	level -= 1
+	return level, points
 
 def create_data_model(filepath):
 	xypair = [0,0]
