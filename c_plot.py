@@ -14,18 +14,16 @@ import time
 import csv
 
 app = Flask(__name__)
+app.secret_key = "hello"
 
-#CLOSE FILE?
-@app.route('/test')
+#LETS REALLY UNDERSTAND THIS!
+@app.route('/upload')
 def upload_file():
-	return render_template('test.html')
+	return render_template('upload.html')
 	
-@app.route('/run', methods = ['GET', 'POST'])
+@app.route('/view', methods = ['GET', 'POST'])
 def uploaded_file():
 	if request.method == 'POST':
-
-		# Create dictionary for TSP	
-		data = {}
 
 		# Get and store file
 		f = request.files['file']
@@ -33,21 +31,47 @@ def uploaded_file():
 		f.save('static/' + infile)
 
 		# Set image parameters
-		levels = '95%,100%'
-		size = '128x64'
+		size = request.form.get('size')
+		limit = request.form.get('point_limit') 
 
-		# Create output file name
-		outfile = infile.split('.')[0] + '.pbm'
+		# Create output file names
+		basename = infile.split('.')[0]
+		session['basename'] = basename
+		outfile = basename + '.pbm'
+		viewfile = basename + '.gif'
+		#rawfile = basename + '_u.csv'
+		#sortfile = basename + '_o.csv'
 
 		# Convert image to PBM
-		cmd0 =['convert','static/' + infile, '+level', levels, '-resize', size, '-dither', 'FloydSteinberg', '-remap', 'pattern:gray50', '-compress', 'none', 'static/' + outfile]
-		subprocess.call(cmd0, shell=False)
+		total_points = find_limit(int(limit), size, infile)
 
-		# Create data set and print solution as txt file
+		# Create view file
+		cmd = ['convert', 'static/' + outfile, 'static/' + viewfile]
+		subprocess.call(cmd, shell=False)
+
+		return render_template('view.html', user_image = viewfile, points = total_points, filename = outfile)
+
+@app.route('/complete', methods = ['GET', 'POST'])
+def process_file():
+	if request.method == 'POST':
+
+		# Create dictionary for TSP	
+		data = {}
+
+		# Create file names
+		outfile = session['basename'] + '.pbm'
+		rawfile = session['basename'] + '_u.csv'
+		sortfile = session['basename'] + '_o.csv'
+
+		# Create unsorted data set from PBM and save as csv 
 		unsorted = create_data_model('static/' + outfile)
+		print_solution(unsorted, 'static/' + rawfile)
 
-		print_solution(unsorted, 'static/' + infile.split('.')[0] + '_u.csv')
-		#return render_template('complete.html')
+		# Check for which process to perform
+		process = request.form.get('process')
+		if process == 'noTSP':
+			print_to_port('static/' + rawfile)
+			return render_template('complete.html')
 	
 		# Create the routing index manager.
 		data['locations'] = unsorted
@@ -91,7 +115,16 @@ def uploaded_file():
 			print_to_port('static/' + infile.split('.')[0] + '_o.json')
 			
 		return render_template('complete.html')
-	
+
+# Avoids caching of image files
+@app.after_request
+def add_header(r):
+	r.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+	r.headers["Pragma"] = "no-cache"
+	r.headers["Expires"] = "0"
+	r.headers['Cache-Control'] = 'public, max-age=0'
+	return r	
+
 def convert(list):
 	return tuple(list)
 
@@ -113,13 +146,11 @@ def create_data_model(filepath):
 		char = fp.read(1)	 
 		x = 0
 		y = 0
-		line = 0
 		
 		#read the file one character at a time
 		while char:
 			if char != '\n' and char != ' ':
 				if char == '1':
-					line += 1
 					xypair[0] = x
 					xypair[1] = y
 					#print("Line {}: {},{}".format( line, x, y))
@@ -129,8 +160,49 @@ def create_data_model(filepath):
 					x = 0
 					y += 1
 			char = fp.read(1)
-	print('Dataset Complete with {} points.'.format(line))
 	return coordinates
+
+def point_count(black_level, size, filename):
+	outfile = filename.split('.')[0] + '.pbm'
+	levels = '{}%,100%'.format(black_level)
+
+	#command used to convert standard image to reduced size 1-bit image
+	#PIPE TO FOLLOWING COMMANDS??
+	cmd0 =['convert','static/' + filename, '+level', levels, '-resize', size, '-dither', 'FloydSteinberg', '-remap', 'pattern:gray50', '-compress', 'none', 'static/' + outfile]
+	subprocess.call(cmd0, shell=False)
+
+	#commands used to return the number of black pixels in an image
+	cmd1 =['convert', 'static/' + outfile, '-format', '%c', 'histogram:info:']
+	cmd2 =['grep', '#000000']
+	cmd3 =['cut', '-d', ':', '-f1']
+
+	#shell processes for returning image value
+	out1 = subprocess.Popen(cmd1, stdout=subprocess.PIPE, shell=False)
+	out2 = subprocess.Popen(cmd2, stdin=out1.stdout, stdout=subprocess.PIPE, shell=False)
+	out3 = subprocess.Popen(cmd3, stdin=out2.stdout, stdout=subprocess.PIPE, shell=False) 
+	points = int(out3.communicate()[0].decode('utf-8').strip())
+	return points
+
+def find_limit(limit, size, filename):
+	points = 0
+	level = 90
+
+	#look for limit counting down from 90 by 10
+	while points < limit:
+		points = point_count(level, size, filename)
+		print ('{}:{}'.format(level, points))
+		if level < 10:
+			return points
+		level -= 10	
+	level += 11
+
+	#fine tune limit search counting back up by 1
+	while points > limit:
+		points = point_count(level, size, filename)
+		print ('{}:{}'.format(level, points))
+		level += 1
+	level -= 1
+	return points
 
 def compute_euclidean_distance_matrix(locations):
 	"""Creates callback to return distance between points."""
@@ -158,37 +230,19 @@ def ordered_solution(manager, routing, solution, coordinates):
 # Print coordinate list to csv file
 def print_solution(coordinates, filename):
 	with open(filename, 'w', newline='') as fp:
-		obj = csv.writer(fp)
-		obj.writerows(coordinates)
+		csvwriter = csv.writer(fp)
+		csvwriter.writerows(coordinates)
 	
 def print_to_port(filename):
-	xy_pairs = {}
-	ser = serial.Serial('/dev/ttyUSB0', 9600)
+	pairs = ""
+	ser = serial.Serial('/dev/ttyUSB0', 115200)
 	time.sleep(2)
 	with open(filename, 'r') as fp:
-	for element in myFile:
-		xy_pairs = json.dumps({"xy":element})
-		print(element)
-		ser.write(xy_pairs.encode('ascii'))
-		time.sleep(.1)
+		csvreader = csv.reader(fp)
+		for row in csvreader:
+			pairs = json.dumps(row)	
+			ser.write(pairs.encode('ascii'))
+			time.sleep(.05)
 
-def bak_print_solution(manager, routing, solution, coordinates):
-	data_pairs = {}	
-	#NEED USER SET FOR THIS
-#	ser = serial.Serial('/dev/ttyUSB0', 9600)
-	# Arduino needs time to start after reset
-#	time.sleep(2)
-	index = routing.Start(0)
-#	coordinates_route = []
-	while not routing.IsEnd(index):
-#		coordinates_route.append(coordinates[manager.IndexToNode(index)])
-		data_pairs = json.dumps({"xy":coordinates[manager.IndexToNode(index)]})
-		print(data_pairs, file = infile)
-#		ser.write(data_pairs.encode('ascii'))
-		index = solution.Value(routing.NextVar(index))
-#		time.sleep(.1)
-	print('index of {}'.format(index), file = infile)
-	infile.close()
-	
 if __name__ == '__main__':
 	app.run(debug = True)
