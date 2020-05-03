@@ -3,15 +3,17 @@ import math
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, session
 from werkzeug.utils import secure_filename
 import subprocess
 import os
 import sys
 import serial
 import json
+import time
 
 app = Flask(__name__)
+app.secret_key = "hello"
 
 #MOVE THIS FROM GLOBAL
 coordinates = []
@@ -21,6 +23,7 @@ def convert(list):
 
 @app.route('/upload')
 def upload_file():
+#	create_path_solution('static/el4.pbm')
 	return render_template('upload.html')
 	
 @app.route('/uploader', methods = ['GET', 'POST'])
@@ -34,26 +37,37 @@ def uploaded_file():
 		#create file names
 		outfile = infile.split('.')[0] + '.pbm'
 		viewfile = infile.split('.')[0] + '.gif'
+		session["outfile"] = outfile
+		session["viewfile"] = viewfile
 
 		#get data from user
 		size = request.form.get('size')
-		pixels = request.form.get('point_limit') 
+		point_limit = request.form.get('point_limit') 
+		session["size"] = size
 	
 		#calculate number of pixels
-		level, pixels = find_limit(int(pixels), size, infile)	
+		level, total_points = find_limit(int(point_limit), size, infile)	
+		session["level"] = level
+		session["total_points"] = total_points
 	
 		#create view file
 		cmd = ['convert', 'static/' + outfile, 'static/' + viewfile]
 		subprocess.call(cmd, shell=False)
 	
 		#call page
-		return render_template('uploaded.html', user_image = viewfile, points = pixels)
+		return render_template('uploaded.html', user_image = viewfile, points = total_points, filename = session['outfile'])
 
 @app.route('/process', methods = ['GET', 'POST'])
 def process_file():
 	if request.method == 'POST':
-		data = request.form.get('data')
-		print(data)
+		start_time = time.time()
+#		solution, manager, routing = create_path_solution('static/' + session["outfile"])
+		create_path_solution('static/' + session["outfile"])
+		etime = time.time() - start_time
+#		if solution:
+#			print_solution(manager, routing, solution)
+		#return render_template('finished.html', elapse_time = time.time() - start_time, points = session["total_points"])
+		return render_template('finished.html', elapse_time = etime, points = session["total_points"])
 
 #Copied from forums should avoid cacheing. Have not tested if it actually works.
 #Have some evidenced that this might work but need a cache view to be sure
@@ -71,7 +85,6 @@ def point_count(black_level, size, filename):
 
 	#command used to convert standard image to reduced size 1-bit image
 	#PIPE TO FOLLOWING COMMANDS??
-#	cmd0 =['convert','static/' + filename, '+level', levels, '-resize', '640x480', '-dither', 'FloydSteinberg', '-remap', 'pattern:gray50', '-compress', 'none', 'static/' + outfile]
 	cmd0 =['convert','static/' + filename, '+level', levels, '-resize', size, '-dither', 'FloydSteinberg', '-remap', 'pattern:gray50', '-compress', 'none', 'static/' + outfile]
 	subprocess.call(cmd0, shell=False)
 
@@ -90,12 +103,16 @@ def point_count(black_level, size, filename):
 def find_limit(limit, size, filename):
 	points = 0
 	level = 90
+	#look for limit counting down from 90 by 10
 	while points < limit:
 		points = point_count(level, size, filename)
 		print ('{}:{}'.format(level, points))
+		if level < 10:
+			return level, points
 		level -= 10	
-
 	level += 11
+
+	#fine tune limit search counting back up by 1
 	while points > limit:
 		points = point_count(level, size, filename)
 		print ('{}:{}'.format(level, points))
@@ -106,6 +123,7 @@ def find_limit(limit, size, filename):
 def create_data_model(filepath):
 	xypair = [0,0]
 	data = {}
+	data.clear()
 	points = 0
 	with open(filepath) as fp:	
 
@@ -127,9 +145,9 @@ def create_data_model(filepath):
 				if char == '1':
 					xypair[0] = x
 					xypair[1] = y
-#					print("Line {}: {},{}".format( char, x, y))
+					print("Line {}: {},{}".format( char, x, y))
 					coordinates.append(convert(xypair))
-					points += 1
+#					points += 1
 				x += 1
 				if x == int(dimensions[0]):  
 					x = 0
@@ -138,7 +156,7 @@ def create_data_model(filepath):
 		data['locations'] = coordinates
 	data['num_vehicles'] = 1
 	data['depot'] = 0
-	data['points'] = points
+#	data['points'] = points
 	return data
 
 def compute_euclidean_distance_matrix(locations):
@@ -159,6 +177,8 @@ def compute_euclidean_distance_matrix(locations):
 
 def print_solution(manager, routing, solution):
 	data_pairs = {}	
+	data_pairs.clear()
+	#NEED USER SET FOR THIS
 	ser = serial.Serial('/dev/ttyUSB0', 9600)
 	# Arduino needs time to start after reset
 	time.sleep(2)
@@ -172,10 +192,10 @@ def print_solution(manager, routing, solution):
 		index = solution.Value(routing.NextVar(index))
 		time.sleep(.1)
 
-def last():
+def create_path_solution(filename):
 	"""Entry point of the program."""
 	# Instantiate the data problem.
-	data = create_data_model()
+	data = create_data_model(filename)
 
 	# Create the routing index manager.
 	manager = pywrapcp.RoutingIndexManager(len(data['locations']),
@@ -207,9 +227,13 @@ def last():
 	solution = routing.SolveWithParameters(search_parameters)
 	print("solution")
 
+#	return solution, manager, routing
 	# Print solution on console.
 	if solution:
 		print_solution(manager, routing, solution)
 
+#def main():
+#	create_path_solution('static/el4.pbm')
+	
 if __name__ == '__main__':
 	app.run(debug = True)
