@@ -69,9 +69,9 @@ def process_file():
 
 		if process == 'noTSP':
 			print_to_port('static/' + rawfile)
-			return render_template('complete.html')
+			return render_template('complete.html', elapse_time = 0)
 
-		elif process == 'withTSP'
+		elif process == 'withTSP':
 			# Create the routing index manager.
 			data['locations'] = unsorted
 			data['num_vehicles'] = 1
@@ -110,9 +110,9 @@ def process_file():
 			if solution:
 				ordered_pairs = ordered_solution(manager, routing, solution, unsorted)
 				print_solution(ordered_pairs, 'static/' + tspfile)
-				print_to_port('static/' + tspfile)
+				#print_to_port('static/' + tspfile)
 				
-			return render_template('complete.html')
+			return render_template('complete.html', elapse_time = elapse)
 
 # Avoids caching of image files
 @app.after_request
