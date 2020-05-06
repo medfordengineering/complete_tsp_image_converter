@@ -16,7 +16,6 @@ import csv
 app = Flask(__name__)
 app.secret_key = "hello"
 
-#LETS REALLY UNDERSTAND THIS!
 @app.route('/upload')
 def upload_file():
 	return render_template('upload.html')
@@ -39,8 +38,6 @@ def uploaded_file():
 		session['basename'] = basename
 		outfile = basename + '.pbm'
 		viewfile = basename + '.gif'
-		#rawfile = basename + '_u.csv'
-		#sortfile = basename + '_o.csv'
 
 		# Convert image to PBM
 		total_points = find_limit(int(limit), size, infile)
@@ -51,7 +48,7 @@ def uploaded_file():
 
 		return render_template('view.html', user_image = viewfile, points = total_points, filename = outfile)
 
-@app.route('/complete', methods = ['GET', 'POST'])
+@app.route('/process', methods = ['GET', 'POST'])
 def process_file():
 	if request.method == 'POST':
 
@@ -61,7 +58,7 @@ def process_file():
 		# Create file names
 		outfile = session['basename'] + '.pbm'
 		rawfile = session['basename'] + '_u.csv'
-		sortfile = session['basename'] + '_o.csv'
+		tspfile = session['basename'] + '_o.csv'
 
 		# Create unsorted data set from PBM and save as csv 
 		unsorted = create_data_model('static/' + outfile)
@@ -69,52 +66,53 @@ def process_file():
 
 		# Check for which process to perform
 		process = request.form.get('process')
+
 		if process == 'noTSP':
 			print_to_port('static/' + rawfile)
 			return render_template('complete.html')
-	
-		# Create the routing index manager.
-		data['locations'] = unsorted
-		data['num_vehicles'] = 1
-		data['depot'] = 0
-		manager = pywrapcp.RoutingIndexManager(len(data['locations']), data['num_vehicles'], data['depot'])
-		
-		# Create Routing Model.
-		routing = pywrapcp.RoutingModel(manager)
 
-		distance_matrix = compute_euclidean_distance_matrix(data['locations'])
-
-		def distance_callback(from_index, to_index):
-			"""Returns the distance between the two nodes."""
-			# Convert from routing variable Index to distance matrix NodeIndex.
-			from_node = manager.IndexToNode(from_index)
-			to_node = manager.IndexToNode(to_index)
-			return distance_matrix[from_node][to_node]
-
-		transit_callback_index = routing.RegisterTransitCallback(distance_callback)
-
-		# Define cost of each arc.
-		routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
-
-		# Setting first solution heuristic.
-		search_parameters = pywrapcp.DefaultRoutingSearchParameters()
-		search_parameters.first_solution_strategy = (
-			routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
-
-		# Solve the problem and time the process
-		start_time = time.time()
-		solution = routing.SolveWithParameters(search_parameters)
-		elapse = time.time() - start_time
-		print("TSP Complete")
-
-		# Create list of ordered pairs and print to txt file
-		if solution:
-			ordered_pairs = ordered_solution(manager, routing, solution, unsorted)
-			print_solution(ordered_pairs, 'static/' + infile.split('.')[0] + '_o.csv')
+		elif process == 'withTSP'
+			# Create the routing index manager.
+			data['locations'] = unsorted
+			data['num_vehicles'] = 1
+			data['depot'] = 0
+			manager = pywrapcp.RoutingIndexManager(len(data['locations']), data['num_vehicles'], data['depot'])
 			
-			print_to_port('static/' + infile.split('.')[0] + '_o.json')
-			
-		return render_template('complete.html')
+			# Create Routing Model.
+			routing = pywrapcp.RoutingModel(manager)
+
+			distance_matrix = compute_euclidean_distance_matrix(data['locations'])
+
+			def distance_callback(from_index, to_index):
+				"""Returns the distance between the two nodes."""
+				# Convert from routing variable Index to distance matrix NodeIndex.
+				from_node = manager.IndexToNode(from_index)
+				to_node = manager.IndexToNode(to_index)
+				return distance_matrix[from_node][to_node]
+
+			transit_callback_index = routing.RegisterTransitCallback(distance_callback)
+
+			# Define cost of each arc.
+			routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
+
+			# Setting first solution heuristic.
+			search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+			search_parameters.first_solution_strategy = (
+				routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
+
+			# Solve the problem and time the process
+			start_time = time.time()
+			solution = routing.SolveWithParameters(search_parameters)
+			elapse = time.time() - start_time
+			print("TSP Complete")
+
+			# Create list of ordered pairs and print to txt file
+			if solution:
+				ordered_pairs = ordered_solution(manager, routing, solution, unsorted)
+				print_solution(ordered_pairs, 'static/' + tspfile)
+				print_to_port('static/' + tspfile)
+				
+			return render_template('complete.html')
 
 # Avoids caching of image files
 @app.after_request
@@ -190,7 +188,7 @@ def find_limit(limit, size, filename):
 	#look for limit counting down from 90 by 10
 	while points < limit:
 		points = point_count(level, size, filename)
-		print ('{}:{}'.format(level, points))
+		#print ('{}:{}'.format(level, points))
 		if level < 10:
 			return points
 		level -= 10	
@@ -199,7 +197,7 @@ def find_limit(limit, size, filename):
 	#fine tune limit search counting back up by 1
 	while points > limit:
 		points = point_count(level, size, filename)
-		print ('{}:{}'.format(level, points))
+		#print ('{}:{}'.format(level, points))
 		level += 1
 	level -= 1
 	return points
